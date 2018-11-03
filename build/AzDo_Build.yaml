@@ -12,3 +12,7 @@ steps:
 - powershell: |
     Invoke-Build -File "$($Env:BUILD_SOURCESDIRECTORY)\build\build.ps1" -Task RestoreVstsTaskSdk
   displayName: Restore VstsTaskSdk
+
+- powershell: |
+    Invoke-Build -File "$($Env:BUILD_SOURCESDIRECTORY)\build\build.ps1" -Task BuildExtension
+  displayName: Build Extension
