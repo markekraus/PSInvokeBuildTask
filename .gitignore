@@ -1,0 +1,4 @@
+**/ps_modules/VstsTaskSdk/
+bin/
+*.vsix
+**/*.vsix

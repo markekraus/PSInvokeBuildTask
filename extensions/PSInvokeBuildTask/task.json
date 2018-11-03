@@ -1,0 +1,47 @@
+{
+    "id": "23bde69b-9e40-4c80-9365-d1a238e497cb",
+    "name": "PSInvokeBuildTask",
+    "friendlyName": "PowerShell Invoke-Build Task Runner",
+    "description": "This Azure DevOps extension allows for the creation of Azure DevOps build and release pipeline tasks to run PowerShell Invoke-Build tasks.",
+    "helpMarkDown": "[More Info](https://github.com/markekraus/PSInvokeBuildTask)",
+    "category": "Utility",
+    "author": "Mark Kraus",
+    "version": {
+        "Major": 0,
+        "Minor": 1,
+        "Patch": 0
+    },
+    "instanceNameFormat": "Run Invoke-Build Task $(Task)",
+    "inputs": [
+        {
+            "name": "Task",
+            "type": "string",
+            "label": "Invoke-Build Task Name",
+            "defaultValue": "Build",
+            "required": true,
+            "helpMarkDown": "The value you would pass to Invoke-Build -Task. This is a single value and commas will be treated as a literal part of the task name."
+        },
+        {
+            "name": "File",
+            "type": "filePath",
+            "label": "Invoke-Build File Path",
+            "defaultValue": "$(Build.SourcesDirectory)/build/build.ps1",
+            "required": true,
+            "helpMarkDown": "The value you would pass to Invoke-Build -File. This is a single value and commas will be treated as a literal part of the task name."
+        },
+        {
+            "name": "ParameterJson",
+            "type": "multiLine",
+            "label": "Additional Invoke-Build Parameters JSON",
+            "defaultValue": "{}",
+            "required": false,
+            "helpMarkDown": "Enter a Key/Value pair JSON object where keys are additional paramter to be passed to Invoke-Build and the values are the parameter values. 'File', 'Task', and 'Result' will be ignored."
+        }
+    ],
+    "execution": {
+        "PowerShell3": {
+            "target": "$(currentDirectory)\\task.ps1",
+            "workingDirectory": "$(currentDirectory)"
+        }
+    }
+}

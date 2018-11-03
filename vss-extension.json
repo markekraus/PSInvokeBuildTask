@@ -1,0 +1,36 @@
+{
+    "manifestVersion": 1,
+    "id": "ps-invoke-build-task",
+    "name": "PowerShell Invoke-Build Task Runner",
+    "version": "0.0.1",
+    "publisher": "markekraus",
+    "targets": [
+        {
+            "id": "Microsoft.VisualStudio.Services"
+        }
+    ],    
+    "description": "This Azure DevOps extension allows for the creation of Azure DevOps build and release pipeline tasks to run PowerShell Invoke-Build tasks.",
+    "categories": [
+        "Build and release"
+    ],
+    "icons": {
+        "default": "images/wrench-configuration-button128.png"
+    },
+    "files": [
+        {
+            "path": "extensions/PSInvokeBuildTask"
+        }
+    ],
+    "contributions": [
+        {
+            "id": "custom-build-release-task",
+            "type": "ms.vss-distributed-task.task",
+            "targets": [
+                "ms.vss-distributed-task.tasks"
+            ],
+            "properties": {
+                "name": "psinvokebuildtask"
+            }
+        }
+    ]
+}
