@@ -56,7 +56,7 @@ Task Initialize {
     $Script:ExtensionList = [System.Collections.Generic.List[PSObject]]::new()
 
     if (-not $VssExtensionManifest) {
-        $script:VssExtensionManifest = Join-Path $ProjectRoot 'vss-extension.json'
+        $script:VssExtensionManifest = Join-Path $ExtensionsPath 'vss-extension.json'
     }
 
     'ProjectRoot:          {0}' -f $Script:ProjectRoot
@@ -70,6 +70,10 @@ Task IdentifyExtensions Initialize, {
     'Enumerating extensions from {0}..' -f $ExtensionsPath
     ' '
     Get-ChildItem -Path $ExtensionsPath -Directory | ForEach-Object {
+        if ($_.Name -eq 'images') {
+            'Skipping images'
+            return
+        }
         'Found Extension {0} ' -f $_.Name
         $ExtensionList.Add($_)
     }
@@ -79,13 +83,21 @@ Task RestoreVstsTaskSdk Initialize, IdentifyExtensions, {
     foreach ($Extension in $ExtensionList) {
         'Restoring VstsTaskSdk to extension {0}' -f $Extension.Name
         
-        $Path = Join-Path $Extension.FullName 'ps_modules'
+        $ps_modulesPath = Join-Path $Extension.FullName 'ps_modules'
+        $VstsTaskSdkPath = Join-Path $ps_modulesPath 'VstsTaskSdk'
+        $VstsTaskSdkBakPath = Join-Path $ps_modulesPath 'VstsTaskSdk_bak'
+        $VstsTaskSdkFullPath = Join-Path $VstsTaskSdkBakPath $VstsTaskSdkVersion
+        $VstsTaskSdkTmpPath = Join-Path $ps_modulesPath $VstsTaskSdkVersion
 
-        'Ensuring {0}' -f $Path
-        New-Item -ItemType Directory -Path $Path -Force
+        'Ensuring {0}' -f $ps_modulesPath
+        New-Item -ItemType Directory -Path $ps_modulesPath -Force
 
-        'Restoring VstsTaskSdk version {0} to {1}' -f $VstsTaskSdkVersion, $Path
-        Save-Module -Name VstsTaskSdk -Path $Path -RequiredVersion $VstsTaskSdkVersion -Force -ErrorAction Stop -Verbose
+        'Restoring VstsTaskSdk version {0} to {1}' -f $VstsTaskSdkVersion, $ps_modulesPath
+        Save-Module -Name VstsTaskSdk -Path $ps_modulesPath -RequiredVersion $VstsTaskSdkVersion -Force -ErrorAction Stop -Verbose 
+        Move-Item $VstsTaskSdkPath $VstsTaskSdkBakPath -Verbose
+        Move-Item $VstsTaskSdkFullPath $ps_modulesPath -Verbose
+        Rename-Item $VstsTaskSdkTmpPath $VstsTaskSdkPath -Verbose
+        Remove-Item -Force $VstsTaskSdkBakPath -Recurse -Confirm:$false
         ' '
     }
 }
@@ -101,7 +113,7 @@ Task CreatePaths Initialize, {
 }
 
 Task BuildExtension Initialize, CreatePaths, {
-    Push-Location $ProjectRoot -Verbose
+    Push-Location $ExtensionsPath -Verbose
     try {
         'Executing'
         "tfx extension create --manifest-globs $VssExtensionManifest --output-path $OutputPath --no-prompt"

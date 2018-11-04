@@ -1,8 +1,8 @@
 {
     "manifestVersion": 1,
-    "id": "ps-invoke-build-task",
+    "id": "psinvokebuildtask",
     "name": "PowerShell Invoke-Build Task Runner",
-    "version": "0.0.1",
+    "version": "0.1.3",
     "publisher": "markekraus",
     "targets": [
         {
@@ -18,12 +18,12 @@
     },
     "files": [
         {
-            "path": "extensions/PSInvokeBuildTask"
+            "path": "PSInvokeBuildTask"
         }
     ],
     "contributions": [
         {
-            "id": "custom-build-release-task",
+            "id": "psinvokebuildtask",
             "type": "ms.vss-distributed-task.task",
             "targets": [
                 "ms.vss-distributed-task.tasks"

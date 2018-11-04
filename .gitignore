@@ -1,4 +1,5 @@
 **/ps_modules/VstsTaskSdk/
+**/ps_modules/VstsTaskSdk_tmp/
 bin/
 *.vsix
 **/*.vsix

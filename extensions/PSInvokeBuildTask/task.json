@@ -9,7 +9,7 @@
     "version": {
         "Major": 0,
         "Minor": 1,
-        "Patch": 0
+        "Patch": 3
     },
     "instanceNameFormat": "Run Invoke-Build Task $(Task)",
     "inputs": [
@@ -25,7 +25,7 @@
             "name": "File",
             "type": "filePath",
             "label": "Invoke-Build File Path",
-            "defaultValue": "$(Build.SourcesDirectory)/build/build.ps1",
+            "defaultValue": "build/build.ps1",
             "required": true,
             "helpMarkDown": "The value you would pass to Invoke-Build -File. This is a single value and commas will be treated as a literal part of the task name."
         },

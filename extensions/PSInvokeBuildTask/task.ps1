@@ -19,3 +19,4 @@ Get-ChildItem env: | sort Name | ft Name,Value -AutoSize
 '---'
 Get-ChildItem variable: | sort Name | ft Name,Value -AutoSize
 '---'
+'PSModulePath: {0}' -f $env:PSModulePath
