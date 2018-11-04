@@ -18,7 +18,7 @@ Param(
     $DependenciesFile,
 
     [Parameter()]
-    $BuildVersion
+    $BuildVersion = $env:GitVersion_MajorMinorPatch
 )
 
 Set-BuildHeader {
@@ -82,7 +82,7 @@ Task Initialize {
     'VssExtensionStagingManifest: {0}' -f $Script:VssExtensionStagingManifest
 }
 
-Task IdentifyExtensions Initialize, {
+Task GetExtensionList Initialize, {
     'Enumerating extensions from {0}..' -f $StagingPath
     ' '
     Get-ChildItem -Path $StagingPath -Directory | ForEach-Object {
@@ -123,7 +123,7 @@ Task GetDependencies Initialize, {
     $Script:DependenciesData = Get-Content -Raw $DependenciesFile | ConvertFrom-Json
 }
 
-Task RestorePSModules Initialize, IdentifyExtensions, GetDependencies, {
+Task RestorePSModules Initialize, GetExtensionList, GetDependencies, {
     if($ExtensionList.Count -lt 1) {
         'No Extensions found. Ensure StageExtension Task has been run.'
         return
@@ -204,7 +204,7 @@ Task BuildExtension Initialize, CreatePaths, {
     }
 }
 
-Task VersionBump Initialize, {
+Task VersionBump Initialize, GetExtensionList, {
     if(-not $BuildVersion) {
         try {
             'Locating GitVersion binary'
@@ -217,44 +217,57 @@ Task VersionBump Initialize, {
         'Executing GitVersion'
         $GitVersion = GitVersion | ConvertFrom-Json
         Pop-Location
-        $BuildVersion = $GitVersion.NuGetVersionV2
+        $BuildVersion = $GitVersion.MajorMinorPatch
+        'Version {0} derived from GitVersion' -f $BuildVersion
     } else {
-        'Verison {0} supplied as parameter' -f $BuildVersion
+        'Version {0} supplied as parameter' -f $BuildVersion
     }
+    ' '
 
-    $NewVersion, $PreRelease = $BuildVersion -split '-'
-    $PreRelease = -join $PreRelease
-    
-    $Manifest = Import-PowerShellDataFile -Path $ManifestPath
+    $Major, $Minor, $Patch = $BuildVersion -split '\.'
 
-    if(-not $Manifest.PrivateData) {
-        'PrivateData not found in original manifest'
-        $Manifest['PrivateData'] = @{}
+    'Importing VSS Extension Manifest from {0}' -f $VssExtensionStagingManifest
+    $VssExtensionManifestData = Get-Content -Raw $VssExtensionStagingManifest | ConvertFrom-Json
+
+    'Updating {0} from version {1} to version {2}' -f $VssExtensionStagingManifest, $VssExtensionManifestData.version, $BuildVersion
+    $VssExtensionManifestData.version = $BuildVersion
+    $VssExtensionManifestData | ConvertTo-Json -Depth 20 | Set-Content $VssExtensionStagingManifest
+
+    'Retrieving updated manifest data from {0}' -f $VssExtensionStagingManifest
+    $UpdatedVssExtensionManifestData = Get-Content -Raw $VssExtensionStagingManifest | ConvertFrom-Json
+    'Updated version {0} in {1}' -f $UpdatedVssExtensionManifestData.version, $VssExtensionStagingManifest
+    ' '
+
+    foreach ($Extension in $ExtensionList) {
+        $TaskJsonFile = Join-Path $Extension.FullName 'task.json'
+        'Retrieving task.json data from extension {0} from path {1}' -f $Extension.Name, $TaskJsonFile
+        $TaskJsonFileData = Get-Content -Raw $TaskJsonFile | ConvertFrom-Json
+
+        'Updating {0} from' -f $TaskJsonFile
+        'major {0} minor {1} patch {2}' -f @(
+            $TaskJsonFileData.version.Major,
+            $TaskJsonFileData.version.Minor,
+            $TaskJsonFileData.version.Patch
+        )
+        'to'
+        'major {0} minor {1} patch {2}' -f @(
+            $Major,
+            $Minor,
+            $Patch
+        )
+        $TaskJsonFileData.version.Major = $Major
+        $TaskJsonFileData.version.Minor = $Minor
+        $TaskJsonFileData.version.Patch = $Patch
+        $TaskJsonFileData | ConvertTo-Json -Depth 20 | Set-Content $TaskJsonFile
+
+        'Retrieving updated task.json data from extension {0} from path {1}' -f $Extension.Name, $TaskJsonFile
+        $UpdatedTaskJsonFileData = Get-Content -Raw $TaskJsonFile | ConvertFrom-Json
+        'Updated version in {0} major {1} minor {2} patch {3}' -f @(
+            $TaskJsonFile,
+            $UpdatedTaskJsonFileData.version.Major,
+            $UpdatedTaskJsonFileData.version.Minor,
+            $UpdatedTaskJsonFileData.version.Patch
+        )
+        ' '
     }
-
-    'Updating {0} with version {1}' -f $ManifestPath, $NewVersion
-    Update-ModuleManifest -ModuleVersion $NewVersion -Path $ManifestPath
-
-    if ($PreRelease) {
-        'Updating {0} with Prelease {1}' -f $ManifestPath, $Prerelease
-        Update-ModuleManifest -Path $ManifestPath -Prerelease $Prerelease
-    } else {
-        'Removing Prelease'
-        # Update-ModuleManifest does not support commenting out Prerelease.
-        # Using regex to replace the entry instead
-        $ManifestText = Get-Content -Path $ManifestPath | 
-            ForEach-Object { 
-                $PSItem -replace '^(\s*)Prerelease', '$1# Prerelease'
-            }
-        $ManifestText | Set-Content -Encoding 'UTF8' -Path $ManifestPath
-    }
-
-    $NewManifest = Import-PowerShellDataFile -Path $ManifestPath
-
-    'OldManifestVersion:    {0}' -f $Manifest['ModuleVersion']
-    'BuildVersion:          {0}' -f $BuildVersion
-    'NewVersion:            {0}' -f $NewVersion
-    'PreRelease:            {0}' -f $PreRelease
-    'NewManifestVersion:    {0}' -f $NewManifest['ModuleVersion']
-    'NewManifestPrerelease: {0}' -f $NewManifest.PrivateData.PSData.Prerelease
 }
