@@ -10,5 +10,12 @@
         "Version": "5.4.1",
         "Phases": ["RestorePSModules"]
       }
+  ],
+  "npm": [
+    {
+        "Name": "tfx-cli",
+        "Version": "0.6.3",
+        "Phases": ["BuildExtension"]
+    }
   ]
 }

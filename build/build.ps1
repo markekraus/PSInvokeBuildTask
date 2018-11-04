@@ -18,7 +18,13 @@ Param(
     $DependenciesFile,
 
     [Parameter()]
-    $BuildVersion = $env:GitVersion_MajorMinorPatch
+    $BuildVersion = $env:GitVersion_MajorMinorPatch,
+
+    [Parameter()]
+    $VssPublisherPAT = $env:VssPublisherPAT,
+
+    [Parameter()]
+    $VsixFile = $env:VsixFile
 )
 
 Set-BuildHeader {
@@ -80,6 +86,8 @@ Task Initialize {
     'StagingPath:                 {0}' -f $Script:StagingPath
     'VssExtensionManifest:        {0}' -f $Script:VssExtensionManifest
     'VssExtensionStagingManifest: {0}' -f $Script:VssExtensionStagingManifest
+    'VsixFile:                    {0}' -f $Script:VsixFile
+    'VssPublisherPAT present?     {0}' -f (-not [String]::IsNullOrWhiteSpace($Script:VssPublisherPAT))
 }
 
 Task GetExtensionList Initialize, {
@@ -176,6 +184,10 @@ Task CreatePaths Initialize, {
 }
 
 Task Clean Initialize, {
+    'Unset VsixFile'
+    $env:VsixFile = $null
+    Write-Host '##vso[task.setvariable variable=VsixFile]'
+
     $Paths = @(
         $OutputPath,
         $StagingPath
@@ -193,15 +205,77 @@ Task Clean Initialize, {
     }
 }
 
-Task BuildExtension Initialize, CreatePaths, {
+Task FindNpm {
+    $Script:Npm = Get-Command -Name 'npm' -CommandType Application -ErrorAction Stop
+    if ($Npm.Count -gt 1) {
+        if([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)){
+            $NpmCmd = $Script:Npm | Where-Object { $_.Name -eq 'npm.cmd' } | Select-Object -First 1
+        }
+        if($NpmCmd) {
+            $Script:Npm = $NpmCmd
+        } else {
+            $Script:Npm = $Npm | Select-Object -First 1
+        }
+    }
+    if (-not $Script:Npm) {
+        throw 'Unable to locate npm. Make sure it is installed. https://www.npmjs.com/get-npm'
+    } else {
+        'Found npm at {0}' -f $Npm.Path
+    }
+}
+
+Task FindTfx {
+    $Script:Tfx = Get-Command -Name 'tfx' -CommandType Application -ErrorAction Stop
+    if ($Tfx.Count -gt 1) {
+        if([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)){
+            $TfxCmd = $Script:Tfx | Where-Object { $_.Name -eq 'tfx.cmd' } | Select-Object -First 1
+        }
+        if($TfxCmd) {
+            $Script:Tfx = $TfxCmd
+        } else {
+            $Script:Tfx = $Tfx | Select-Object -First 1
+        }
+    }
+    if (-not $Script:Tfx) {
+        throw 'Unable to locate tfx. https://www.npmjs.com/package/tfx-cli'
+    }  else {
+        'Found tfx at {0}' -f $Tfx.Path
+    }
+}
+
+Task InstallBuildExtensionDependencies Initialize, GetDependencies, FindNpm, {
+    $Dependencies = $DependenciesData.npm | Where-Object {$_.Phases -contains 'BuildExtension'}
+    $InstalledPackages = & $Npm list -g --depth 0 --json | ConvertFrom-Json
+    foreach ($Dependency in $Dependencies) {
+        'Checking for {0} version {1}' -f $Dependency.Name, $Dependency.Version
+        $InstalledPackage = $InstalledPackages.dependencies.$($Dependency.Name)
+        if ($InstalledPackage.version -eq $Dependency.Version) {
+            'Found {0} version {1}' -f $Dependency.Name, $Dependency.Version
+            continue
+        }
+
+        'Installing {0} version {1}' -f $Dependency.Name, $Dependency.Version
+        $package = '{0}@{1}' -f $Dependency.Name, $Dependency.Version
+        & $Npm install -g $package
+    }
+}
+
+Task BuildExtension Initialize, CreatePaths, InstallBuildExtensionDependencies, FindTfx, {
     Push-Location $StagingPath -Verbose
     try {
         'Executing'
         "tfx extension create --manifest-globs $VssExtensionStagingManifest --output-path $OutputPath --no-prompt"
-        tfx extension create --manifest-globs $VssExtensionStagingManifest --output-path $OutputPath --no-prompt
+        $output = & $Tfx extension create --manifest-globs $VssExtensionStagingManifest --output-path $OutputPath --no-prompt --json
     } finally {
         Pop-Location -Verbose
     }
+    $output
+    if (-not $output) {
+        Throw 'Build failed'
+    }
+    $data = $output | ConvertFrom-Json -ErrorAction Stop
+    $env:VsixFile = $data.path
+    Write-Host ('##vso[task.setvariable variable=VsixFile]{0}' -f $data.path)
 }
 
 Task VersionBump Initialize, GetExtensionList, {
@@ -269,5 +343,21 @@ Task VersionBump Initialize, GetExtensionList, {
             $UpdatedTaskJsonFileData.version.Patch
         )
         ' '
+    }
+}
+
+Task Build Initialize, StageExtension, RestorePSModules, VersionBump, BuildExtension
+
+Task PublishExtension Initialize, FindTfx, {
+    if (-not $VsixFile) {
+        throw 'VsixFile must be set'
+    }
+
+    'Executing'
+    'tfx extension publish --vsix {0} --auth-type pat --token ***' -f $VsixFile
+    $output = & $tfx extension publish --vsix $VsixFile --auth-type pat --token $VssPublisherPAT --json
+    $output
+    if (-not $output.published) {
+        throw 'Publishing failed'
     }
 }
