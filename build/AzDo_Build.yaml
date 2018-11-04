@@ -5,13 +5,20 @@ queue:
   name: Hosted VS2017
 
 steps:
+- task: gittools.gitversion.gitversion-task.GitVersion@4
+  displayName: GitVersion
+
 - powershell: |
     & "$($Env:BUILD_SOURCESDIRECTORY)\build\bootstrap.ps1" -InstallInvokeBuild -PSGalleryFallback
   displayName: BOOTSTRAP - Install InvokeBuild
 
 - powershell: |
-    Invoke-Build -File "$($Env:BUILD_SOURCESDIRECTORY)\build\build.ps1" -Task RestoreVstsTaskSdk
-  displayName: Restore VstsTaskSdk
+    Invoke-Build -File "$($Env:BUILD_SOURCESDIRECTORY)\build\build.ps1" -Task StageExtension
+  displayName: Stage Extension
+
+- powershell: |
+    Invoke-Build -File "$($Env:BUILD_SOURCESDIRECTORY)\build\build.ps1" -Task RestorePSModules
+  displayName: Restore PowerShell Modules
 
 - powershell: |
     Invoke-Build -File "$($Env:BUILD_SOURCESDIRECTORY)\build\build.ps1" -Task BuildExtension
