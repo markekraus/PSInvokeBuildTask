@@ -1,22 +1,15 @@
 [CmdletBinding()]
 Param()
 
-$Task = Get-VstsInput -Name 'Task' -Require
-$File = Get-VstsInput -Name 'File' -Require
-$ParameterJson = Get-VstsInput -Name 'ParameterJson'
+$TaskJsonFile = Join-Path $PSScriptRoot 'task.json'
+$TaskJsonData = Get-Content -raw $TaskJsonFile | ConvertFrom-Json
 
-'Task: {0}' -f $Task
-'File: {0}' -f $File
-'ParameterJson:'
-'---'
-$ParameterJson
-'---'
-'Env:'
-'---'
-Get-ChildItem env: | sort Name | ft Name,Value -AutoSize
-'---'
-'Variable:'
-'---'
-Get-ChildItem variable: | sort Name | ft Name,Value -AutoSize
-'---'
-'PSModulePath: {0}' -f $env:PSModulePath
+$Inputs = @{}
+foreach ($InputItem in $TaskJsonData.Inputs) {
+    $Params = @{
+        Name = $InputItem.Name
+        Require = $InputItem.required
+        AsBool = $InputItem.type -eq 'boolean'
+    }
+    $Inputs[$InputItem.Name] = Get-VstsInput -Name 'Task'
+}
