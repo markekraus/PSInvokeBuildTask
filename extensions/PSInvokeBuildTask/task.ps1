@@ -45,12 +45,14 @@ if ($Inputs.ParameterJson) {
         Throw ('ParameterJson only supports a single key/value pair object. {0} is not supported.' -f $Parameters.PSObject.TypeNames[0])
     }
 
+    # Convert the Object to HashTable to reuse as a Parameter Splat
     $ParameterNames = $Parameters.PSObject.Properties.Name
     foreach ($ParameterName in $ParameterNames) {
         $Params[$ParameterName] = $Parameters.$ParameterName
     }
 }
 
+# Set the Task, File, and Result parameters
 $Params['Task'] = $Inputs.Task
 $Params['File'] = $Inputs.File
 $Params['Result'] = 'Result'
@@ -58,5 +60,6 @@ $Params['Result'] = 'Result'
 try {
     Invoke-Build @Params
 } finally {
+    # This ensures a report of results is printed even if Invoke-Build has errors.
     $Result.Tasks | Format-Table Elapsed, Name, Error -AutoSize 
 }
