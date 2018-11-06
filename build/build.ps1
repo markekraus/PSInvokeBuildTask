@@ -357,7 +357,8 @@ Task PublishExtension Initialize, FindTfx, {
     'tfx extension publish --vsix {0} --auth-type pat --token ***' -f $VsixFile
     $output = & $tfx extension publish --vsix $VsixFile --auth-type pat --token $VssPublisherPAT --json
     $output
-    if (-not $output.published) {
+    $data = $output | ConvertFrom-Json -ErrorAction Stop
+    if (-not $data.published) {
         throw 'Publishing failed'
     }
 }
