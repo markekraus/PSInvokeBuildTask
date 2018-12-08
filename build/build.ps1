@@ -24,7 +24,11 @@ Param(
     $VssPublisherPAT = $env:VssPublisherPAT,
 
     [Parameter()]
-    $VsixFile = $env:VsixFile
+    $VsixFile = $env:VsixFile,
+
+    [Parameter()]
+    [switch]
+    $IsPreview
 )
 
 Set-BuildHeader {
@@ -211,7 +215,8 @@ Task RestorePSModules Initialize, GetExtensionList, GetDependencies, {
 Task CreatePaths Initialize, {
     $Paths = @(
         $OutputPath,
-        $StagingPath
+        $StagingPath,
+        $PSModulesStagingPath
     )
     foreach ($Path in $Paths) {
         'Ensuring {0}' -f $Path
@@ -226,7 +231,8 @@ Task Clean Initialize, {
 
     $Paths = @(
         $OutputPath,
-        $StagingPath
+        $StagingPath,
+        $PSModulesStagingPath
     )
     foreach ($Path in $Paths) {
         'Removing {0}' -f $Path
@@ -296,6 +302,27 @@ Task InstallBuildExtensionDependencies Initialize, GetDependencies, FindNpm, {
     }
 }
 
+Task SetExtensionId Initialize, {
+    'Importing data from {0}' -f $VssExtensionManifest
+    $VssExtensionManifestData = Get-Content -Raw $VssExtensionManifest | ConvertFrom-Json
+    'Importing data from {0}' -f $VssExtensionStagingManifest
+    $VssExtensionStagingManifestData = Get-Content -Raw $VssExtensionStagingManifest | ConvertFrom-Json
+
+    if ($IsDevBuild) {
+        'Will use development Extension id'
+        $NewId = '{0}-dev' -f $VssExtensionManifestData.id
+    } else {
+        'Will use production Extension id'
+        $NewId = $VssExtensionManifestData.id
+    }
+    'Setting id to {0} in {1}' -f $NewId, $VssExtensionStagingManifest
+    $VssExtensionStagingManifestData.id = $NewId
+    $VssExtensionStagingManifestData | ConvertTo-Json -Depth 20 | Set-Content $VssExtensionStagingManifest
+
+    $UpdatedVssExtensionStagingManifestData = Get-Content -Raw $VssExtensionStagingManifest | ConvertFrom-Json
+    'Updated id: {0}' -f $UpdatedVssExtensionStagingManifestData.id
+}
+
 Task BuildExtension Initialize, CreatePaths, InstallBuildExtensionDependencies, FindTfx, {
     Push-Location $StagingPath -Verbose
     try {
@@ -310,8 +337,16 @@ Task BuildExtension Initialize, CreatePaths, InstallBuildExtensionDependencies, 
         Throw 'Build failed'
     }
     $data = $output | ConvertFrom-Json -ErrorAction Stop
-    $env:VsixFile = $data.path
-    Write-Host ('##vso[task.setvariable variable=VsixFile]{0}' -f $data.path)
+
+    if ($IsDevBuild) {
+        $Script:VsixDevFile =  $data.path
+        $env:VsixDevFile = $data.path
+        Write-Host ('##vso[task.setvariable variable=VsixDevFile]{0}' -f $data.path)
+    } else {
+        $Script:VsixFile =  $data.path
+        $env:VsixFile = $data.path
+        Write-Host ('##vso[task.setvariable variable=VsixFile]{0}' -f $data.path)
+    }
 }
 
 Task VersionBump Initialize, GetExtensionList, {
@@ -338,6 +373,12 @@ Task VersionBump Initialize, GetExtensionList, {
 
     'Importing VSS Extension Manifest from {0}' -f $VssExtensionStagingManifest
     $VssExtensionManifestData = Get-Content -Raw $VssExtensionStagingManifest | ConvertFrom-Json
+
+    if (0 -eq $Major) {
+        'Setting IsPreview true'
+        $Script:IsPreview = $true
+        'IsPreview: {0}' -f $Script:IsPreview
+    }
 
     'Updating {0} from version {1} to version {2}' -f $VssExtensionStagingManifest, $VssExtensionManifestData.version, $BuildVersion
     $VssExtensionManifestData.version = $BuildVersion
@@ -382,7 +423,75 @@ Task VersionBump Initialize, GetExtensionList, {
     }
 }
 
-Task Build Initialize, StageExtension, RestorePSModules, VersionBump, BuildExtension
+Task SetPreviewTag -If {$true -eq $IsPreview} Initialize, {
+    'Importing VSS Extension Manifest from {0}' -f $VssExtensionStagingManifest
+    $VssExtensionManifestData = Get-Content -Raw $VssExtensionStagingManifest | ConvertFrom-Json
+    
+    'Tagging as Preview'
+    if ($VssExtensionManifestData.PSObject.Properties.Name -notcontains 'galleryFlags') {
+        'Adding galleryFlags property'
+        $VssExtensionManifestData | Add-Member -MemberType NoteProperty -Name 'galleryFlags' -Value @()
+    }
+    if (-not $VssExtensionManifestData.galleryFlags -is 'System.Object[]') {
+        'Setting galleryFlags to Object[]'
+        $VssExtensionManifestData.galleryFlags = @()
+    }
+    $VssExtensionManifestData.galleryFlags += 'Preview'
+
+    $VssExtensionManifestData | ConvertTo-Json -Depth 20 | Set-Content $VssExtensionStagingManifest
+}
+
+Task UpdateExtensionContributions Initialize, GetExtensionList, {
+    'Importing VSS Extension Manifest from {0}' -f $VssExtensionStagingManifest
+    $VssExtensionManifestData = Get-Content -Raw $VssExtensionStagingManifest | ConvertFrom-Json
+
+    if ($VssExtensionManifestData.PSObject.Properties.Name -notcontains 'contributions') {
+        $VssExtensionManifestData | Add-Member -MemberType NoteProperty -Name 'contributions' -Value $null
+    }
+    $VssExtensionManifestData.contributions = [System.Collections.Generic.List[PSObject]]::new()
+
+    $Contributions = $VssExtensionManifestData.contributions
+
+    foreach ($Extension in $ExtensionList) {
+        $TaskJsonFile = Join-Path $Extension.FullName 'task.json'
+        'Retrieving task.json data from extension {0} from path {1}' -f $Extension.Name, $TaskJsonFile
+        $TaskJsonFileData = Get-Content -Raw $TaskJsonFile | ConvertFrom-Json
+        $Contribution = [PSCustomObject]@{
+            id = $TaskJsonFileData.name
+            type = 'ms.vss-distributed-task.task'
+            description = $TaskJsonFileData.description
+            targets = @('ms.vss-distributed-task.tasks')
+            properties = [PSCustomObject]@{
+                name = $TaskJsonFileData.name
+            }
+        }
+        'Adding contribution: {0}' -f $($Contribution | ConvertTo-Json -Depth 20 -Compress)
+        $Contributions.Add($Contribution)
+    }
+
+    'Updating {0}' -f $VssExtensionStagingManifest
+    $VssExtensionManifestData | ConvertTo-Json -Depth 20 | Set-Content $VssExtensionStagingManifest
+
+    'Retrieving updated manifest data from {0}' -f $VssExtensionStagingManifest
+    $UpdatedVssExtensionManifestData = Get-Content -Raw $VssExtensionStagingManifest | ConvertFrom-Json
+    'Updated Contributions:'
+    $UpdatedVssExtensionManifestData.contributions | ConvertTo-Json -Depth 20
+}
+
+Task SetDevBuild {
+    $Script:IsDevBuild = $true
+    'IsDevBuild: {0}' -f $Script:IsDevBuild
+}
+
+Task SetIsPreview {
+    $Script:IsPreview = $true
+    'IsPreview: {0}' -f $Script:IsPreview
+}
+
+Task BuildDevExtension Initialize, SetDevBuild, SetExtensionId, SetIsPreview, SetPreviewTag, BuildExtension
+
+Task Build Initialize, StageExtension, RestorePSModules, VersionBump, UpdateExtensionContributions, SetExtensionId, SetPreviewTag, BuildExtension
+Task BuildDev Initialize, StageExtension, RestorePSModules, VersionBump, UpdateExtensionContributions, SetDevBuild, SetExtensionId, SetIsPreview, SetPreviewTag, BuildExtension
 
 Task PublishExtension Initialize, FindTfx, {
     if (-not $VsixFile) {
