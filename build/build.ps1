@@ -77,6 +77,17 @@ Task Initialize {
 
     $script:VssExtensionStagingManifest = Join-Path $StagingPath 'vss-extension.json'
 
+    $script:PSModulesStagingPath = Join-Path $OutputPath 'psmodules'
+    if ($env:PSModulePath -notmatch ([regex]::Escape($PSModulesStagingPath))) {
+        'Adding {0} to PSModulePath' -f $PSModulesStagingPath
+        $env:PSModulePath = '{0}{1}{2}' -f @(
+            $env:PSModulePath,
+            ([System.IO.Path]::PathSeparator),
+            $PSModulesStagingPath
+        )
+    }
+
+    ' '
     'ProjectRoot:                 {0}' -f $Script:ProjectRoot
     'ConfigPath:                  {0}' -f $Script:ConfigPath
     'DependenciesFile:            {0}' -f $Script:DependenciesFile
@@ -84,6 +95,7 @@ Task Initialize {
     'VstsTaskSdkVersion:          {0}' -f $Script:VstsTaskSdkVersion
     'OutputPath:                  {0}' -f $Script:OutputPath
     'StagingPath:                 {0}' -f $Script:StagingPath
+    'PSModulesStagingPath:        {0}' -f $Script:PSModulesStagingPath
     'VssExtensionManifest:        {0}' -f $Script:VssExtensionManifest
     'VssExtensionStagingManifest: {0}' -f $Script:VssExtensionStagingManifest
     'VsixFile:                    {0}' -f $Script:VsixFile
@@ -98,8 +110,13 @@ Task GetExtensionList Initialize, {
             'Skipping images'
             return
         }
-        'Found Extension {0} ' -f $_.Name
-        $ExtensionList.Add($_)
+        $TaskJsonFile = Join-Path $_.FullName 'task.json'
+        if (Test-Path $TaskJsonFile) {
+            'Found Extension {0} ' -f $_.Name
+            $ExtensionList.Add($_)
+        } else {
+            '{0} skip. no task.json present' -f $_.FullName
+        }
     }
 }
 
@@ -138,18 +155,33 @@ Task RestorePSModules Initialize, GetExtensionList, GetDependencies, {
     }
 
     foreach ($Extension in $ExtensionList) {
-        $Dependencies = $DependenciesData.PowerShell | Where-Object {$_.Phases -contains 'RestorePSModules'}
+        $Dependencies = $DependenciesData.PowerShell | Where-Object {$_.Phases -contains $Extension.Name}
         $ps_modulesPath = Join-Path $Extension.FullName 'ps_modules'
         'Ensuring {0}' -f $ps_modulesPath
         New-Item -ItemType Directory -Path $ps_modulesPath -Force
         Foreach ($Dependency in $Dependencies) {
             'Restoring Module {0} Version {1} to extension {2}' -f $Dependency.Name, $Dependency.Version, $Extension.Name
+            $Module = Get-Module -ListAvailable -Name $Dependency.Name -Refresh | Where-Object {$_.Version -eq $Dependency.Version}
+            if ($Module) {
+                'Module was found in {0}' -f $Module.ModuleBase
+                $ModuleSource = $Module.ModuleBase
+            } else {
+                'Saving Module {0} version {1} to path {2}' -f $Dependency.Name, $Dependency.Version, $PSModulesStagingPath
+                $Params = @{
+                    Name = $Dependency.Name
+                    Path = $PSModulesStagingPath
+                    RequiredVersion = $Dependency.Version
+                    Force = $true
+                    ErrorAction = 'Stop'
+                    Verbose = $true
+                }
+                Save-Module @Params
+                $ModuleSource = Join-Path $PSModulesStagingPath $Dependency.Name
+                $ModuleSource = Join-Path $ModuleSource $Dependency.Version
+                'Module saved to {0}' -f $ModuleSource
+            }
 
             $ModulePath = Join-Path $ps_modulesPath $Dependency.Name
-            $ModulePathBak = Join-Path $ps_modulesPath ('{0}_bak' -f $Dependency.Name)
-            $ModulePathFull = Join-Path $ModulePathBak $Dependency.Version
-            $ModulePathTmp = Join-Path $ps_modulesPath $Dependency.Version
-
             Try {
                 'Removing {0}' -f $ModulePath 
                 Remove-Item -Path $ModulePath -Force -Recurse -ErrorAction Stop -Verbose
@@ -159,14 +191,18 @@ Task RestorePSModules Initialize, GetExtensionList, GetDependencies, {
                 # We do care about other issues.
                 Write-Error -ErrorRecord $_
             }
+            'Ensuring {0}' -f $ModulePath
+            New-Item $ModulePath -ItemType Directory -Force -ErrorAction SilentlyContinue
 
-            'Saving Module {0} version {1} to path {2}' -f $Dependency.Name, $Dependency.Version, $ps_modulesPath
-            Save-Module -Name $Dependency.Name -Path $ps_modulesPath -RequiredVersion $Dependency.Version -Force -ErrorAction Stop -Verbose
-            Move-Item $ModulePath $ModulePathBak -Verbose
-            Move-Item $ModulePathFull $ps_modulesPath -Verbose
-            Rename-Item $ModulePathTmp $ModulePath -Verbose
-            Remove-Item -Force $ModulePathBak -Recurse -Confirm:$false
-            ' '
+            Get-ChildItem -Path $ModuleSource -Force | Foreach-Object {
+                if ($_.PSIsContainer) {
+                    'Copying Directory {0} to {1}' -f $_.Name, $ModulePath
+                    Copy-Item $_.FullName $ModulePath -Container -Recurse -Force -Verbose
+                } else {
+                    'Copying File {0} to {1}' -f $_.Name, $ModulePath
+                    Copy-Item $_.FullName $ModulePath -force -Verbose
+                }
+            }
         }
         ' '
     }

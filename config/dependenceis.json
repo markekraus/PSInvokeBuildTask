@@ -3,12 +3,12 @@
     {
       "Name": "VstsTaskSdk",
       "Version": "0.11.0",
-      "Phases": ["RestorePSModules"]
+      "Phases": ["PSInvokeBuildTask"]
     },
     {
         "Name": "InvokeBuild",
         "Version": "5.4.1",
-        "Phases": ["RestorePSModules"]
+        "Phases": ["PSInvokeBuildTask"]
       }
   ],
   "npm": [
